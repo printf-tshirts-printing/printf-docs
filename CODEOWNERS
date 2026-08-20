@@ -1,0 +1,3 @@
+*                     @printf-tshirts-printing/devex
+/docs/api/            @printf-tshirts-printing/devex @printf-tshirts-printing/orders
+/docs/guides/sizing.md @printf-tshirts-printing/devex @printf-tshirts-printing/catalog

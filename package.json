@@ -1,0 +1,14 @@
+{
+  "name": "printf-docs",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "docusaurus start",
+    "build": "docusaurus build",
+    "sync-api": "node scripts/sync-openapi.mjs ../order-api/openapi.yaml"
+  },
+  "dependencies": {
+    "@docusaurus/core": "^3.2.1",
+    "@docusaurus/preset-classic": "^3.2.1"
+  }
+}

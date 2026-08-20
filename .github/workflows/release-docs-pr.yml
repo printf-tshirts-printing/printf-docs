@@ -1,0 +1,82 @@
+name: Open release docs PR
+
+# Dispatched by the Port workflow `release_docs` once a human has approved the
+# drafted artifacts. Everything here is mechanical — the writing already
+# happened, and it was reviewed before this ran.
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Release title, e.g. "order-api 2.4.0"
+        required: true
+      pr_title:
+        description: Title for the docs PR
+        required: true
+      pr_body:
+        description: Body for the docs PR
+        required: true
+      changelog_entry:
+        description: Markdown block to prepend to the changelog
+        required: true
+      page_updates:
+        description: JSON array of { identifier, path, content }
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  open-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create branch
+        id: branch
+        run: |
+          set -euo pipefail
+          slug="$(echo "${{ inputs.release }}" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-')"
+          branch="docs/${slug}-$(date +%s)"
+          git checkout -b "$branch"
+          echo "name=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Apply page updates
+        run: |
+          set -euo pipefail
+          echo '${{ inputs.page_updates }}' > /tmp/updates.json
+          jq -c '.[]' /tmp/updates.json | while read -r update; do
+            path="$(echo "$update" | jq -r '.path')"
+            mkdir -p "$(dirname "$path")"
+            echo "$update" | jq -r '.content' > "$path"
+            echo "wrote $path"
+          done
+
+      - name: Prepend changelog entry
+        run: |
+          set -euo pipefail
+          entry='${{ inputs.changelog_entry }}'
+          header="$(head -n 6 docs/changelog.md)"
+          body="$(tail -n +7 docs/changelog.md)"
+          printf '%s\n\n%s\n%s\n' "$header" "$entry" "$body" > docs/changelog.md
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          git config user.name "printf-release-bot"
+          git config user.email "release-bot@printf.dev"
+          git add -A
+          git commit -m "docs: ${{ inputs.release }}"
+          git push origin "${{ steps.branch.outputs.name }}"
+
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh pr create \
+            --title "${{ inputs.pr_title }}" \
+            --body "${{ inputs.pr_body }}" \
+            --base main \
+            --head "${{ steps.branch.outputs.name }}" \
+            --label documentation
