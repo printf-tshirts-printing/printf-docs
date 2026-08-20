@@ -3,6 +3,11 @@ name: Open release docs PR
 # Dispatched by the Port workflow `release_docs` once a human has approved the
 # drafted artifacts. Everything here is mechanical — the writing already
 # happened, and it was reviewed before this ran.
+#
+# Every input is passed through `env:` and never interpolated into a shell
+# script with ${{ }}. The page bodies are Markdown full of backticks, quotes and
+# parentheses; splicing them into bash is both a syntax error waiting to happen
+# and a command injection hole.
 on:
   workflow_dispatch:
     inputs:
@@ -34,49 +39,83 @@ jobs:
 
       - name: Create branch
         id: branch
+        env:
+          RELEASE: ${{ inputs.release }}
         run: |
           set -euo pipefail
-          slug="$(echo "${{ inputs.release }}" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-')"
-          branch="docs/${slug}-$(date +%s)"
+          slug="$(printf '%s' "$RELEASE" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-')"
+          branch="docs/${slug}-${GITHUB_RUN_ID}"
           git checkout -b "$branch"
           echo "name=$branch" >> "$GITHUB_OUTPUT"
 
       - name: Apply page updates
+        env:
+          PAGE_UPDATES: ${{ inputs.page_updates }}
         run: |
           set -euo pipefail
-          echo '${{ inputs.page_updates }}' > /tmp/updates.json
-          jq -c '.[]' /tmp/updates.json | while read -r update; do
-            path="$(echo "$update" | jq -r '.path')"
+          printf '%s' "$PAGE_UPDATES" > /tmp/updates.json
+
+          if ! jq -e 'type == "array" and length > 0' /tmp/updates.json > /dev/null; then
+            echo "page_updates must be a non-empty JSON array" >&2
+            exit 1
+          fi
+
+          count="$(jq 'length' /tmp/updates.json)"
+          for i in $(seq 0 $((count - 1))); do
+            path="$(jq -r --argjson i "$i" '.[$i].path' /tmp/updates.json)"
+
+            # Refuse anything that would write outside docs/.
+            case "$path" in
+              docs/*) ;;
+              *) echo "refusing to write outside docs/: $path" >&2; exit 1 ;;
+            esac
+            case "$path" in
+              *..*) echo "refusing path traversal: $path" >&2; exit 1 ;;
+            esac
+
             mkdir -p "$(dirname "$path")"
-            echo "$update" | jq -r '.content' > "$path"
+            jq -r --argjson i "$i" '.[$i].content' /tmp/updates.json > "$path"
             echo "wrote $path"
           done
 
       - name: Prepend changelog entry
+        env:
+          CHANGELOG_ENTRY: ${{ inputs.changelog_entry }}
         run: |
           set -euo pipefail
-          entry='${{ inputs.changelog_entry }}'
-          header="$(head -n 6 docs/changelog.md)"
-          body="$(tail -n +7 docs/changelog.md)"
-          printf '%s\n\n%s\n%s\n' "$header" "$entry" "$body" > docs/changelog.md
+          # The changelog keeps its frontmatter and H1; entries go below.
+          head -n 8 docs/changelog.md > /tmp/changelog.new
+          printf '\n%s\n' "$CHANGELOG_ENTRY" >> /tmp/changelog.new
+          tail -n +9 docs/changelog.md >> /tmp/changelog.new
+          mv /tmp/changelog.new docs/changelog.md
 
       - name: Commit and push
+        env:
+          RELEASE: ${{ inputs.release }}
         run: |
           set -euo pipefail
           git config user.name "printf-release-bot"
           git config user.email "release-bot@printf.dev"
           git add -A
-          git commit -m "docs: ${{ inputs.release }}"
+          if git diff --cached --quiet; then
+            echo "no documentation changes to commit" >&2
+            exit 1
+          fi
+          git commit -m "docs: $RELEASE"
           git push origin "${{ steps.branch.outputs.name }}"
 
       - name: Open pull request
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_TITLE: ${{ inputs.pr_title }}
+          PR_BODY: ${{ inputs.pr_body }}
+          BRANCH: ${{ steps.branch.outputs.name }}
         run: |
           set -euo pipefail
+          printf '%s' "$PR_BODY" > /tmp/pr-body.md
           gh pr create \
-            --title "${{ inputs.pr_title }}" \
-            --body "${{ inputs.pr_body }}" \
+            --title "$PR_TITLE" \
+            --body-file /tmp/pr-body.md \
             --base main \
-            --head "${{ steps.branch.outputs.name }}" \
+            --head "$BRANCH" \
             --label documentation
