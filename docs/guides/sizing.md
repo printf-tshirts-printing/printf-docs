@@ -1,57 +1,129 @@
 ---
 title: Sizing and fit
 section: guides
-last_reviewed: 2026-05-14
-owner: devex
-covers_endpoints: [POST /v2/orders]
-covers_sdks: [printf-js, printf-py, printf-go, printf-java, printf-rb]
+last_reviewed: 2026-08-20
+owner: docs-platform
+covers_endpoints:
+  - POST /v2/orders
+covers_sdks:
+  - printf-js
+  - printf-py
+  - printf-go
+  - printf-java
+  - printf-rb
 ---
 
 # Sizing and fit
 
-Every order line carries a `size`. Sizes use standard letter labels:
+As of order-api **2.4.0**, bare size labels like `"XL"` are resolved against a named size system. Ladders differ materially across systems — a JP `XL` has a 97 cm chest; a US `XL` has a 112 cm chest. Getting this wrong ships the wrong garment.
 
-| Label | Chest (flat) |
+> **SDK notice:** `printf-js`, `printf-py`, `printf-go`, `printf-java`, and `printf-rb` all report `supportsSizeSystem=false`. They do not yet model `size_system`, `fit`, or `resolved_size`. Use raw HTTP calls or wait for updated SDK releases if you need these fields through a client library.
+
+## Size systems
+
+| Code | Description | Facilities that default to this system |
+|---|---|---|
+| `US` | US standard | `fac-atx` (Austin) |
+| `EU` | European standard | `fac-ber` (Berlin) |
+| `JP` | Japanese standard | `fac-osa` (Osaka) |
+
+## Chest measurement ladders
+
+### US
+
+| Size label | Chest (cm) |
 |---|---|
-| `XS`  | 86 cm  |
-| `S`   | 91 cm  |
-| `M`   | 97 cm  |
-| `L`   | 102 cm |
-| `XL`  | 112 cm |
-| `2XL` | 122 cm |
-| `3XL` | 132 cm |
+| S | 91 |
+| M | 99 |
+| L | 107 |
+| XL | 112 |
+| 2XL | 117 |
+
+### EU
+
+| Size label | Chest (cm) |
+|---|---|
+| S | 88 |
+| M | 96 |
+| L | 104 |
+| XL | 110 |
+| 2XL | 116 |
+
+### JP
+
+| Size label | Chest (cm) |
+|---|---|
+| S | 82 |
+| M | 89 |
+| L | 96 |
+| XL | 97 |
+| 2XL | 104 |
+
+> These tables are informational. The authoritative value for any order line is `resolved_size.chest_cm` on the API response.
+
+## Setting size_system on a request
+
+Set `size_system` at the line level for precision. Set it at the order level as a default for all lines. A line-level value always overrides the order-level value.
 
 ```json
 {
-  "designId": "dsn_7fa91c",
-  "size": "L",
-  "quantity": 250,
-  "garmentSku": "tee-classic-black"
+  "accountId": "acct_stackfest",
+  "size_system": "US",
+  "facilityId": "fac-atx",
+  "destination": {
+    "name": "StackFest Ops",
+    "line1": "410 Congress Ave",
+    "city": "Austin",
+    "region": "TX",
+    "postalCode": "78701",
+    "countryCode": "US"
+  },
+  "lines": [
+    {
+      "designId": "dsn_7fa91c",
+      "size": "XL",
+      "size_system": "US",
+      "fit": "unisex",
+      "quantity": 250,
+      "garmentSku": "tee-classic-black"
+    }
+  ]
 }
 ```
 
-## Picking sizes for an event
+## fit
 
-The distribution that works for most developer conferences:
+The `fit` field is set per line. It contributes to size resolution and is echoed back in `resolved_size.fit`.
 
-| Size | Share |
-|---|---|
-| S   | 10% |
-| M   | 25% |
-| L   | 30% |
-| XL  | 20% |
-| 2XL | 10% |
-| 3XL | 5%  |
+Accepted values depend on the garment SKU. `"unisex"` is accepted on all SKUs.
 
-Order 10% over your headcount. Attendees take a shirt for a colleague who could
-not make it, every single time.
+## Resolution chain
 
-## Fit
+When `size_system` is absent on a line, the API walks this chain and uses the first value it finds:
 
-All garments are a classic unisex cut. If you need fitted or relaxed cuts, talk
-to your account manager — it is a per-order arrangement, not an API field.
+1. `size_system` on the line
+2. `size_system` on the order
+3. Default configured on the account
+4. Default of the fulfilling facility
 
-## Measuring
+**Multi-facility accounts:** if resolution reaches step 4 and your account can route to more than one facility, the request fails with `400 size_system_ambiguous`. The facility default is routing-dependent and cannot be determined from the payload alone. Set `size_system` explicitly.
 
-Chest measurements are flat, laid out, armpit to armpit, doubled. A garment
-measured on a body will read differently and is not what our spec sheets use.
+**Single-facility accounts:** resolution to step 4 succeeds today but emits a `size_system_implicit` deprecation warning in the response. This becomes a hard `400` error in **2.6.0**.
+
+## Verifying resolved size
+
+Every line in the response carries `resolved_size`:
+
+```json
+{
+  "label": "XL",
+  "system": "US",
+  "fit": "unisex",
+  "chest_cm": 112
+}
+```
+
+The `X-Printf-Size-System` response header also reports the system applied to the order.
+
+Always check `resolved_size.chest_cm` in your test environment when switching facilities or size systems — the same label can differ by 15 cm across systems.
+
