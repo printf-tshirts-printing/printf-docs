@@ -1,57 +1,117 @@
 ---
 title: Sizing and fit
 section: guides
-last_reviewed: 2026-05-14
-owner: devex
-covers_endpoints: [POST /v2/orders]
-covers_sdks: [printf-js, printf-py, printf-go, printf-java, printf-rb]
+last_reviewed: 2026-08-20
+owner: dx
+covers_endpoints:
+  - POST /v2/orders
+covers_sdks:
+  - printf-js
+  - printf-py
+  - printf-go
+  - printf-java
+  - printf-rb
 ---
 
 # Sizing and fit
 
-Every order line carries a `size`. Sizes use standard letter labels:
+As of order-api **2.4.0**, bare size labels like `L` or `XL` are resolved against a named size ladder. You must tell Printf which ladder to use via `size_system`. Failing to do so produces a warning today (`size_system_implicit`) and a hard error in **2.6** (`size_system_ambiguous`).
 
-| Label | Chest (flat) |
+> **SDK notice — size_system support pending.** `printf-js` (v2.3.4), `printf-py` (v2.3.2), `printf-go` (v2.3.1), `printf-java` (v3.2.1), and `printf-rb` (v2.3.0) all have `supportsSizeSystem: false`. Use raw HTTP calls for size-critical orders until updated SDK releases ship.
+
+## Size systems
+
+Three systems are supported:
+
+| `size_system` | Coverage | Example facility |
+|---|---|---|
+| `US` | United States | Austin (`fac-atx`) |
+| `EU` | Europe | Berlin (`fac-ber`) |
+| `JP` | Japan | Osaka (`fac-osa`) |
+
+## Size ladders
+
+Ladders differ materially across systems. Always check chest measurements when switching systems.
+
+### Chest measurement by system and size (cm)
+
+| Label | US | EU | JP |
+|---|---|---|---|
+| S | 96 | 92 | 86 |
+| M | 100 | 96 | 91 |
+| L | 106 | 100 | 96 |
+| XL | 112 | 106 | 97 |
+| 2XL | 118 | 112 | 102 |
+
+> A JP `XL` (97 cm) is equivalent to a US `M`/`L` boundary. Do not assume label equivalence across systems.
+
+## The `fit` field
+
+Each line accepts a `fit` value:
+
+| Value | Description |
 |---|---|
-| `XS`  | 86 cm  |
-| `S`   | 91 cm  |
-| `M`   | 97 cm  |
-| `L`   | 102 cm |
-| `XL`  | 112 cm |
-| `2XL` | 122 cm |
-| `3XL` | 132 cm |
+| `unisex` | Default cut |
+| `mens` | Broader shoulders, longer body |
+| `womens` | Tapered waist |
+| `youth` | Children's proportions |
 
-```json
+## Setting `size_system`
+
+`size_system` can be set at the order root (applies to all lines) or overridden per line. The resolution order is: **line → order → account → facility default**.
+
+```http
+POST /v2/orders
+Content-Type: application/json
+
 {
-  "designId": "dsn_7fa91c",
-  "size": "L",
-  "quantity": 250,
-  "garmentSku": "tee-classic-black"
+  "accountId": "acct_stackfest",
+  "size_system": "US",
+  "facilityId": "fac-atx",
+  "destination": {
+    "name": "StackFest Ops",
+    "line1": "410 Congress Ave",
+    "city": "Austin",
+    "region": "TX",
+    "postalCode": "78701",
+    "countryCode": "US"
+  },
+  "lines": [
+    {
+      "designId": "dsn_7fa91c",
+      "size": "XL",
+      "size_system": "US",
+      "fit": "unisex",
+      "quantity": 250,
+      "garmentSku": "tee-classic-black"
+    }
+  ]
 }
 ```
 
-## Picking sizes for an event
+The response includes `resolved_size` on every line:
 
-The distribution that works for most developer conferences:
+```json
+{
+  "resolved_size": {
+    "label": "XL",
+    "system": "US",
+    "fit": "unisex",
+    "chest_cm": 112
+  }
+}
+```
 
-| Size | Share |
-|---|---|
-| S   | 10% |
-| M   | 25% |
-| L   | 30% |
-| XL  | 20% |
-| 2XL | 10% |
-| 3XL | 5%  |
+The `X-Printf-Size-System` response header confirms the effective system used for the order.
 
-Order 10% over your headcount. Attendees take a shirt for a colleague who could
-not make it, every single time.
+## Error and warning codes
 
-## Fit
+| Code | HTTP | When it fires | Becomes error in |
+|---|---|---|---|
+| `size_system_ambiguous` | 400 | Account routes to multiple facilities and no `size_system` is set | Already an error |
+| `size_system_implicit` | — (warning) | `size_system` resolved from facility default; single-facility accounts only | 2.6 |
 
-All garments are a classic unisex cut. If you need fitted or relaxed cuts, talk
-to your account manager — it is a per-order arrangement, not an API field.
+## Saved order templates
 
-## Measuring
+Templates that omit `size_system` will receive `400 size_system_ambiguous` at runtime if the account routes to more than one facility. Add `size_system` to every template before running bulk jobs. See [Bulk orders and templates](docs/guides/bulk-orders.md).
 
-Chest measurements are flat, laid out, armpit to armpit, doubled. A garment
-measured on a body will read differently and is not what our spec sheets use.
