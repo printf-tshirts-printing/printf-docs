@@ -7,6 +7,17 @@ owner: devex
 
 # Changelog
 
+## 2026-08-21 — Orders API 2.4.0
+
+**Sizing and fit: `size` is no longer ambiguous.**
+
+- `POST /v2/orders` now accepts `size_system` (`US` / `EU` / `JP`) at the order level and per line; each line also accepts `fit`.
+- Responses and webhook payloads include `resolved_size` per line (`label`, `system`, `fit`, `chest_cm`). A new `X-Printf-Size-System` response header echoes the resolved system.
+- Accounts that can route to more than one facility **must** send `size_system` explicitly. Omitting it now returns `400 size_system_ambiguous` instead of silently resolving to a facility guess.
+- Single-facility accounts that omit `size_system` receive a `size_system_implicit` warning today. This becomes a hard error in **2.6**.
+
+Saved order templates carry no explicit `size_system`. [Update them before 2.6](/guides/sizing-and-fit#migrating-saved-templates).
+
 ## 2026-07-28 — Orders API 2.3.6
 Designs above 40 MB now fail fast with `art_too_large` instead of timing out.
 
