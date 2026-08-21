@@ -1,44 +1,80 @@
 ---
 title: Bulk orders and templates
-section: guides
-last_reviewed: 2026-04-02
-owner: devex
-covers_endpoints: [POST /v2/orders]
-covers_sdks: [printf-js, printf-py]
+section: Guides
+last_reviewed: 2026-08-21
+owner: platform-docs
+covers_endpoints:
+  - POST /v2/orders
+  - POST /v2/orders/bulk
+covers_sdks:
+  - printf-js
+  - printf-py
+  - printf-java
+  - printf-go
+  - printf-rb
 ---
 
 # Bulk orders and templates
 
-Conference orders are large, repetitive, and placed under time pressure. Saved
-templates exist so you are not rebuilding a 2,000-unit payload at midnight.
+Bulk orders and saved templates follow the same size resolution rules as single orders. **If you use templates, read the templates section below before 2.6 ships.**
 
-## Saving a template
+## Bulk orders
 
-Templates are configured in the dashboard, not the API. A template stores the
-line structure — designs, sizes, quantities, garment SKUs — and leaves the
-destination to be filled in per order.
+Each order in a bulk request is resolved independently. Set `size_system` on each order body, or on each line, so every unit resolves without ambiguity.
 
 ```json
+POST /v2/orders/bulk
 {
-  "accountId": "acct_stackfest",
-  "templateId": "tpl_booth_standard",
-  "destination": { "...": "..." }
+  "orders": [
+    {
+      "accountId": "acct_stackfest",
+      "size_system": "US",
+      "facilityId": "fac-atx",
+      "destination": {
+        "name": "StackFest Ops",
+        "line1": "410 Congress Ave",
+        "city": "Austin",
+        "region": "TX",
+        "postalCode": "78701",
+        "countryCode": "US"
+      },
+      "lines": [
+        {
+          "designId": "dsn_7fa91c",
+          "size": "XL",
+          "size_system": "US",
+          "fit": "unisex",
+          "quantity": 250,
+          "garmentSku": "tee-classic-black"
+        }
+      ]
+    }
+  ]
 }
 ```
 
-## What a template does not store
+Each order in the response includes `resolved_size` on every line.
 
-A template stores *what* to print, never *where*. Facility selection happens at
-order time, based on the destination you supply.
+## Saved order templates
 
-:::tip
-Re-run your template against the sandbox before a large event. A template that
-worked last year references design IDs and garment SKUs that may since have been
-retired.
-:::
+⚠️ **Action required before API 2.6.**
 
-## Limits
+Templates are stored snapshots of an order body. They were created before `size_system` existed, so most templates omit it. The resolution rules apply at submission time, not at template creation time.
 
-- 5,000 units per line
-- 40 lines per order
-- Templates do not expire, but the designs they reference can be archived
+**What happens today (2.4.0 – 2.5.x):**
+- Templates without `size_system` trigger a `size_system_implicit` warning on every submission.
+- Single-facility accounts: the order fulfils, but the warning is in the response.
+- Multi-facility accounts: the submission is rejected with `400 size_system_ambiguous`.
+
+**What happens in 2.6:**
+- `size_system_implicit` becomes `400 size_system_implicit`. All template submissions without `size_system` fail.
+
+### How to fix your templates
+
+1. List your templates via the dashboard or the API.
+2. For each template, add `size_system` at the order level and/or on each line.
+3. Save the updated template.
+4. Resubmit a test order to confirm `resolved_size` looks correct and no warning appears.
+
+Use the `X-Printf-Size-System` response header to verify which system was applied.
+
