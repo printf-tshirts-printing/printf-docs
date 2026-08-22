@@ -7,6 +7,37 @@ owner: devex
 
 # Changelog
 
+## order-api 2.4.0 — Size disambiguation (breaking)
+
+**Released:** 2026-08-22
+
+### What changed
+
+Size labels now require an explicit system. A bare `size` value with no `size_system` context is ambiguous — a JP `XL` (97 cm chest) and a US `XL` (112 cm chest) are different garments.
+
+### New fields
+
+| Location | Field | Type | Values |
+|---|---|---|---|
+| Order body | `size_system` | string | `US`, `EU`, `JP` |
+| Line item | `size_system` | string | `US`, `EU`, `JP` |
+| Line item | `fit` | string | `unisex`, `womens`, `mens` |
+| Response line | `resolved_size` | object | `{ label, system, fit, chest_cm }` |
+| Response header | `X-Printf-Size-System` | string | Resolved system for the request |
+
+### Breaking change
+
+Accounts that route to **more than one facility** and omit `size_system` at every level receive `400 size_system_ambiguous`. Previously the API resolved by guess.
+
+### Deprecation path
+
+- **2.4.0 (now):** Single-facility accounts that omit `size_system` receive a `size_system_implicit` warning in the response. Requests still succeed.
+- **2.6.0:** `size_system_implicit` becomes a `400` error for all accounts.
+
+### Affected client libraries
+
+printf-js, printf-py, printf-java, printf-go, printf-rb
+
 ## 2026-07-28 — Orders API 2.3.6
 Designs above 40 MB now fail fast with `art_too_large` instead of timing out.
 
