@@ -1,57 +1,136 @@
 ---
 title: Sizing and fit
 section: guides
-last_reviewed: 2026-05-14
-owner: devex
-covers_endpoints: [POST /v2/orders]
-covers_sdks: [printf-js, printf-py, printf-go, printf-java, printf-rb]
+last_reviewed: 2026-08-22
+owner: platform-docs
+covers_endpoints:
+  - POST /v2/orders
+  - GET /v2/orders/{orderId}
+covers_sdks:
+  - printf-js
+  - printf-py
+  - printf-java
+  - printf-go
+  - printf-rb
 ---
 
 # Sizing and fit
 
-Every order line carries a `size`. Sizes use standard letter labels:
+As of **order-api 2.4.0**, every size label must carry an explicit size system. Omitting it causes a `400 size_system_ambiguous` error for multi-facility accounts, and a `size_system_implicit` warning (error in 2.6) for single-facility accounts.
 
-| Label | Chest (flat) |
-|---|---|
-| `XS`  | 86 cm  |
-| `S`   | 91 cm  |
-| `M`   | 97 cm  |
-| `L`   | 102 cm |
-| `XL`  | 112 cm |
-| `2XL` | 122 cm |
-| `3XL` | 132 cm |
+## Size systems
+
+| `size_system` | Region | US `XL` chest equivalent |
+|---|---|---|
+| `US` | United States, Canada | 112 cm |
+| `EU` | Europe | 112 cm (different ladder at smaller sizes) |
+| `JP` | Japan | 97 cm |
+
+Ladders differ materially. A JP `XL` and a US `XL` are **different garments**. Always declare the system.
+
+## Declaring the system
+
+You can set `size_system` at two scopes. The most specific value wins.
+
+| Scope | Field | Applies to |
+|---|---|---|
+| Order | `size_system` | All lines that omit their own `size_system` |
+| Line | `size_system` | That line only |
+
+### Order-level declaration (all lines share a system)
 
 ```json
+POST /v2/orders
 {
-  "designId": "dsn_7fa91c",
-  "size": "L",
-  "quantity": 250,
-  "garmentSku": "tee-classic-black"
+  "accountId": "acct_stackfest",
+  "size_system": "US",
+  "facilityId": "fac-atx",
+  "destination": {
+    "name": "StackFest Ops",
+    "line1": "410 Congress Ave",
+    "city": "Austin",
+    "region": "TX",
+    "postalCode": "78701",
+    "countryCode": "US"
+  },
+  "lines": [
+    {
+      "designId": "dsn_7fa91c",
+      "garmentSku": "tee-classic-black",
+      "size": "XL",
+      "fit": "unisex",
+      "quantity": 250
+    }
+  ]
 }
 ```
 
-## Picking sizes for an event
+### Line-level override (mixed systems in one order)
 
-The distribution that works for most developer conferences:
+```json
+POST /v2/orders
+{
+  "accountId": "acct_stackfest",
+  "size_system": "US",
+  "facilityId": "fac-atx",
+  "destination": {
+    "name": "StackFest Ops",
+    "line1": "410 Congress Ave",
+    "city": "Austin",
+    "region": "TX",
+    "postalCode": "78701",
+    "countryCode": "US"
+  },
+  "lines": [
+    {
+      "designId": "dsn_7fa91c",
+      "garmentSku": "tee-classic-black",
+      "size": "XL",
+      "size_system": "US",
+      "fit": "unisex",
+      "quantity": 100
+    },
+    {
+      "designId": "dsn_7fa91c",
+      "garmentSku": "tee-classic-black",
+      "size": "XL",
+      "size_system": "JP",
+      "fit": "unisex",
+      "quantity": 50
+    }
+  ]
+}
+```
 
-| Size | Share |
-|---|---|
-| S   | 10% |
-| M   | 25% |
-| L   | 30% |
-| XL  | 20% |
-| 2XL | 10% |
-| 3XL | 5%  |
+The two `XL` lines above resolve to different physical garments (112 cm vs 97 cm chest).
 
-Order 10% over your headcount. Attendees take a shirt for a colleague who could
-not make it, every single time.
+## The `fit` field
 
-## Fit
+Each line accepts an optional `fit` value: `unisex` (default), `womens`, or `mens`. Fit affects the cut ladder independently of the size system.
 
-All garments are a classic unisex cut. If you need fitted or relaxed cuts, talk
-to your account manager — it is a per-order arrangement, not an API field.
+## Reading `resolved_size` in responses
 
-## Measuring
+Every response line now includes `resolved_size`:
 
-Chest measurements are flat, laid out, armpit to armpit, doubled. A garment
-measured on a body will read differently and is not what our spec sheets use.
+```json
+{
+  "label": "XL",
+  "system": "US",
+  "fit": "unisex",
+  "chest_cm": 112
+}
+```
+
+Verify `chest_cm` against your garment spec before confirming large print runs. The response header `X-Printf-Size-System` echoes the system resolved for the request as a whole.
+
+## Webhook payloads
+
+`resolved_size` is included on every line item in webhook payloads, using the same shape as the API response. No webhook schema changes are required to receive it, but you should start reading it.
+
+## Error reference
+
+| Code | HTTP | Meaning | Remedy |
+|---|---|---|---|
+| `size_system_ambiguous` | 400 | Account routes to multiple facilities and no `size_system` was provided at any level | Add `size_system` to the order or each line |
+| `size_system_implicit` | warning (400 in 2.6) | Single-facility account omitted `size_system`; resolved from facility default | Add `size_system` before upgrading to 2.6 |
+
