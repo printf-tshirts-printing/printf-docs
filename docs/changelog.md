@@ -7,6 +7,32 @@ owner: devex
 
 # Changelog
 
+## order-api 2.4.0 — Size disambiguation
+
+**Released:** 2026-08-24
+
+**Breaking change** — `size` values without an explicit size system are no longer silently resolved.
+
+### What's new
+
+| Feature | Details |
+|---|---|
+| `size_system` on order and per line | Accepts `US`, `EU`, or `JP`. |
+| `fit` per line | Accepted on `lines[]` items. |
+| `resolved_size` on responses and webhooks | Returns `{ label, system, fit, chest_cm }` per line. |
+| `X-Printf-Size-System` response header | Reflects the system used to resolve sizes for the request. |
+
+### Breaking behavior
+
+Bare size labels (e.g. `"XL"` with no `size_system`) previously resolved by internal guess. As of 2.4.0:
+
+- Accounts routable to **more than one facility** receive `400 size_system_ambiguous`.
+- Accounts routable to **exactly one facility** receive a `size_system_implicit` warning in the response. This warning becomes an error (`400`) in 2.6.0.
+
+### Why it matters
+
+Ladders differ materially. A JP `XL` is 97 cm chest; a US `XL` is 112 cm. Silent resolution was producing wrong garment sizes.
+
 ## 2026-07-28 — Orders API 2.3.6
 Designs above 40 MB now fail fast with `art_too_large` instead of timing out.
 

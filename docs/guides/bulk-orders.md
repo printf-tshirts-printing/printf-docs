@@ -1,44 +1,103 @@
 ---
 title: Bulk orders and templates
-section: guides
-last_reviewed: 2026-04-02
-owner: devex
-covers_endpoints: [POST /v2/orders]
-covers_sdks: [printf-js, printf-py]
+section: Guides
+last_reviewed: 2026-08-24
+owner: platform
+covers_endpoints: POST /v2/orders, POST /v2/order-templates, POST /v2/order-templates/{templateId}/submit
+covers_sdks: printf-js, printf-py, printf-java, printf-rb, printf-go
 ---
 
 # Bulk orders and templates
 
-Conference orders are large, repetitive, and placed under time pressure. Saved
-templates exist so you are not rebuilding a 2,000-unit payload at midnight.
+This guide covers sending large single orders and working with saved order templates.
 
-## Saving a template
+> **2.4.0 breaking change — templates require `size_system`.**
+> Saved templates that omit `size_system` will fail or warn depending on your account's facility routing. See [Sizing and fit](sizing.md) for the full resolution ladder. Review and update your templates before 2.6.0, when bare size labels become an error.
 
-Templates are configured in the dashboard, not the API. A template stores the
-line structure — designs, sizes, quantities, garment SKUs — and leaves the
-destination to be filled in per order.
+## Bulk orders
+
+Send many units in a single request by adding multiple items to `lines[]`. Each line requires `designId`, `garmentSku`, `quantity`, `size`, and `size_system`. All lines share the order-level `destination` and `accountId`.
 
 ```json
+POST /v2/orders
 {
   "accountId": "acct_stackfest",
-  "templateId": "tpl_booth_standard",
-  "destination": { "...": "..." }
+  "size_system": "US",
+  "destination": {
+    "name": "StackFest Ops",
+    "line1": "410 Congress Ave",
+    "city": "Austin",
+    "region": "TX",
+    "postalCode": "78701",
+    "countryCode": "US"
+  },
+  "lines": [
+    {
+      "designId": "dsn_7fa91c",
+      "garmentSku": "tee-classic-black",
+      "quantity": 250,
+      "size": "XL",
+      "size_system": "US",
+      "fit": "unisex"
+    },
+    {
+      "designId": "dsn_7fa91c",
+      "garmentSku": "tee-classic-black",
+      "quantity": 100,
+      "size": "L",
+      "size_system": "US",
+      "fit": "unisex"
+    },
+    {
+      "designId": "dsn_7fa91c",
+      "garmentSku": "tee-classic-black",
+      "quantity": 50,
+      "size": "M",
+      "size_system": "EU",
+      "fit": "womens"
+    }
+  ]
 }
 ```
 
-## What a template does not store
+You can mix `size_system` values across lines. A per-line `size_system` always overrides the order-level one.
 
-A template stores *what* to print, never *where*. Facility selection happens at
-order time, based on the destination you supply.
+## Saved order templates
 
-:::tip
-Re-run your template against the sandbox before a large event. A template that
-worked last year references design IDs and garment SKUs that may since have been
-retired.
-:::
+Templates store a full order payload that you can resubmit on demand. As of 2.4.0, any template saved without `size_system` will trigger `size_system_implicit` warnings (single-facility accounts) or be rejected outright with `400 size_system_ambiguous` (multi-facility accounts).
 
-## Limits
+**Templates are not visible from the API listing — you must update each one by identifier.** If you created templates before 2.4.0, retrieve them now and add `size_system` to the order level, to each line, or both.
 
-- 5,000 units per line
-- 40 lines per order
-- Templates do not expire, but the designs they reference can be archived
+### Template line schema (2.4.0 and later)
+
+| Field | Required | Notes |
+|---|---|---|
+| `designId` | ✅ | |
+| `garmentSku` | ✅ | |
+| `quantity` | ✅ | |
+| `size` | ✅ | Bare label; must be paired with `size_system`. |
+| `size_system` | ✅ (recommended) | `US`, `EU`, or `JP`. Required in 2.6.0. |
+| `fit` | Optional | `unisex`, `mens`, `womens`. |
+
+### `resolved_size` in template submissions
+
+When you submit a template, each line in the response includes `resolved_size`:
+
+```json
+{
+  "label": "XL",
+  "system": "US",
+  "fit": "unisex",
+  "chest_cm": 112
+}
+```
+
+Verify `resolved_size.system` and `resolved_size.chest_cm` match your expectation before treating a bulk submission as confirmed.
+
+## Errors and warnings
+
+| Code | Type | Meaning |
+|---|---|---|
+| `size_system_ambiguous` | `400` error | No `size_system` resolved; account routes to multiple facilities. |
+| `size_system_implicit` | Warning | `size_system` inferred from single facility. Becomes `400` in 2.6.0. |
+
