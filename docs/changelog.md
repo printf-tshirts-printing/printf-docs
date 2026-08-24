@@ -7,6 +7,36 @@ owner: devex
 
 # Changelog
 
+## order-api 2.4.0 — Size disambiguation
+
+**Released:** 2026-08-24
+
+### Breaking change
+
+`size` on order lines must now carry an explicit `size_system` (`US`, `EU`, or `JP`). Bare size labels that cannot be unambiguously resolved are rejected.
+
+### What's new
+
+| Field / header | Where | Notes |
+|---|---|---|
+| `size_system` | Order body + per line | `US`, `EU`, or `JP` |
+| `fit` | Per line | `unisex`, `mens`, `womens` |
+| `resolved_size` | Response lines + webhook payloads | `{ label, system, fit, chest_cm }` |
+| `X-Printf-Size-System` | Response header | Effective system used for the order |
+
+### Error and warning codes
+
+- **`400 size_system_ambiguous`** — multi-facility accounts that omit `size_system` and cannot be resolved deterministically.
+- **`size_system_implicit` (warning)** — single-facility accounts that omit `size_system`. Becomes a hard error in **2.6**.
+
+### Why ladders differ
+
+A JP `XL` chest is 97 cm; a US `XL` chest is 112 cm. Mismatched systems mean garments in the wrong size ship — not a mapping error you can catch in QA.
+
+### Affected SDKs
+
+`printf-js`, `printf-py`, `printf-java`, `printf-go`, `printf-rb` — update to the 2.4.x release of your library before deploying.
+
 ## 2026-07-28 — Orders API 2.3.6
 Designs above 40 MB now fail fast with `art_too_large` instead of timing out.
 
