@@ -1,57 +1,105 @@
 ---
 title: Sizing and fit
-section: guides
-last_reviewed: 2026-05-14
-owner: devex
-covers_endpoints: [POST /v2/orders]
-covers_sdks: [printf-js, printf-py, printf-go, printf-java, printf-rb]
+section: Guides
+last_reviewed: 2026-08-24
+owner: platform
+covers_endpoints:
+  - POST /v2/orders
+  - GET /v2/orders/{orderId}
+covers_sdks:
+  - printf-js
+  - printf-py
+  - printf-java
+  - printf-rb
+  - printf-go
 ---
 
 # Sizing and fit
 
-Every order line carries a `size`. Sizes use standard letter labels:
+As of **order-api 2.4.0**, every order line carries an explicit size system. Bare size labels are no longer resolved by guessing.
 
-| Label | Chest (flat) |
-|---|---|
-| `XS`  | 86 cm  |
-| `S`   | 91 cm  |
-| `M`   | 97 cm  |
-| `L`   | 102 cm |
-| `XL`  | 112 cm |
-| `2XL` | 122 cm |
-| `3XL` | 132 cm |
+## Size systems
+
+| Value | Region | XL chest (cm) |
+|-------|--------|---------------|
+| `US`  | United States / Canada | 112 |
+| `EU`  | Europe | 104 |
+| `JP`  | Japan  | 97  |
+
+Ladders differ materially. A JP `XL` is 15 cm narrower in the chest than a US `XL`. Always pass `size_system` explicitly to avoid fulfillment errors.
+
+## Where to set `size_system`
+
+`size_system` can appear at two levels of the request:
+
+| Level | Field | Scope |
+|-------|-------|-------|
+| Order root | `size_system` | Default for all lines that omit their own `size_system` |
+| Line | `size_system` | Overrides the order-level value for that line |
+
+The resolution chain is: **line → order → account default → fulfilling facility default**.
+
+Accounts routable to more than one facility cannot fall through to the facility default — the request is rejected with `400 size_system_ambiguous`. Pass `size_system` at the order or line level to resolve this.
+
+## The `fit` field
+
+Each line accepts a `fit` value:
+
+| Value | Description |
+|-------|-------------|
+| `unisex` | Unisex cut (default when omitted on older requests; set explicitly from 2.4.0) |
+| `mens` | Mens cut |
+| `womens` | Womens cut |
+
+## Request example
 
 ```json
+POST /v2/orders
 {
-  "designId": "dsn_7fa91c",
-  "size": "L",
-  "quantity": 250,
-  "garmentSku": "tee-classic-black"
+  "accountId": "acct_stackfest",
+  "size_system": "US",
+  "facilityId": "fac-atx",
+  "destination": {
+    "name": "StackFest Ops",
+    "line1": "410 Congress Ave",
+    "city": "Austin",
+    "region": "TX",
+    "postalCode": "78701",
+    "countryCode": "US"
+  },
+  "lines": [
+    {
+      "designId": "dsn_7fa91c",
+      "size": "XL",
+      "size_system": "US",
+      "fit": "unisex",
+      "quantity": 250,
+      "garmentSku": "tee-classic-black"
+    }
+  ]
 }
 ```
 
-## Picking sizes for an event
+## Response: `resolved_size`
 
-The distribution that works for most developer conferences:
+Every line in the response now includes a `resolved_size` object:
 
-| Size | Share |
-|---|---|
-| S   | 10% |
-| M   | 25% |
-| L   | 30% |
-| XL  | 20% |
-| 2XL | 10% |
-| 3XL | 5%  |
+```json
+{
+  "label": "XL",
+  "system": "US",
+  "fit": "unisex",
+  "chest_cm": 112
+}
+```
 
-Order 10% over your headcount. Attendees take a shirt for a colleague who could
-not make it, every single time.
+The `X-Printf-Size-System` response header contains the system actually applied to the order. Use this to confirm which system was resolved when `size_system` was not set at the line level.
 
-## Fit
+## Warning: `size_system_implicit`
 
-All garments are a classic unisex cut. If you need fitted or relaxed cuts, talk
-to your account manager — it is a per-order arrangement, not an API field.
+If `size_system` is absent and your account has a single fulfilling facility, the request succeeds with a `size_system_implicit` warning in the response body. **This warning becomes an error in 2.6.** Set `size_system` explicitly on every order or line before the 2.6 release to avoid breakage.
 
-## Measuring
+## Saved order templates
 
-Chest measurements are flat, laid out, armpit to armpit, doubled. A garment
-measured on a body will read differently and is not what our spec sheets use.
+Templates do not appear in the API response for `GET /v2/orders`, but they are affected. Any template created before 2.4.0 that does not include `size_system` will produce a `size_system_implicit` warning on fulfillment. Review and update all saved templates before 2.6.
+
