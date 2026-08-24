@@ -1,57 +1,101 @@
 ---
 title: Sizing and fit
 section: guides
-last_reviewed: 2026-05-14
-owner: devex
-covers_endpoints: [POST /v2/orders]
-covers_sdks: [printf-js, printf-py, printf-go, printf-java, printf-rb]
+last_reviewed: 2026-08-24
+owner: platform
+covers_endpoints: POST /v2/orders, GET /v2/orders/{id}
+covers_sdks: printf-js, printf-py, printf-java, printf-go, printf-rb
 ---
 
 # Sizing and fit
 
-Every order line carries a `size`. Sizes use standard letter labels:
+As of **2.4.0**, every size label must be accompanied by an explicit size system. Bare size labels are no longer silently resolved by guessing. See the [migration note](../guides/sizing.md#migration) if you are upgrading from 2.3.x.
 
-| Label | Chest (flat) |
+## Size systems
+
+| `size_system` value | Coverage |
 |---|---|
-| `XS`  | 86 cm  |
-| `S`   | 91 cm  |
-| `M`   | 97 cm  |
-| `L`   | 102 cm |
-| `XL`  | 112 cm |
-| `2XL` | 122 cm |
-| `3XL` | 132 cm |
+| `US` | United States |
+| `EU` | Europe (EN 13402) |
+| `JP` | Japan (JIS L 4004) |
+
+Set `size_system` at the order level to apply one system to every line. Override it per line when a single order mixes systems.
+
+Ladders differ materially. Always check `resolved_size.chest_cm` in staging before sending production volume.
+
+| Label | System | Chest (cm) |
+|---|---|---|
+| XL | US | 112 |
+| XL | EU | 108 |
+| XL | JP | 97 |
+
+## Request structure
+
+A complete order with explicit sizing:
 
 ```json
+POST /v2/orders
 {
-  "designId": "dsn_7fa91c",
-  "size": "L",
-  "quantity": 250,
-  "garmentSku": "tee-classic-black"
+  "accountId": "acct_stackfest",
+  "size_system": "US",
+  "facilityId": "fac-atx",
+  "destination": {
+    "name": "StackFest Ops",
+    "line1": "410 Congress Ave",
+    "city": "Austin",
+    "region": "TX",
+    "postalCode": "78701",
+    "countryCode": "US"
+  },
+  "lines": [
+    {
+      "designId": "dsn_7fa91c",
+      "size": "XL",
+      "size_system": "US",
+      "fit": "unisex",
+      "quantity": 250,
+      "garmentSku": "tee-classic-black"
+    }
+  ]
 }
 ```
 
-## Picking sizes for an event
+## The `fit` field
 
-The distribution that works for most developer conferences:
+Each line accepts an optional `fit` value. Supported values: `"unisex"`, `"womens"`, `"mens"`.
 
-| Size | Share |
-|---|---|
-| S   | 10% |
-| M   | 25% |
-| L   | 30% |
-| XL  | 20% |
-| 2XL | 10% |
-| 3XL | 5%  |
+If omitted, the garment's default fit is used and reflected back in `resolved_size.fit`.
 
-Order 10% over your headcount. Attendees take a shirt for a colleague who could
-not make it, every single time.
+## The `resolved_size` response object
 
-## Fit
+Every line in the response carries a `resolved_size` object:
 
-All garments are a classic unisex cut. If you need fitted or relaxed cuts, talk
-to your account manager — it is a per-order arrangement, not an API field.
+```json
+{ "label": "XL", "system": "US", "fit": "unisex", "chest_cm": 112 }
+```
 
-## Measuring
+| Field | Type | Description |
+|---|---|---|
+| `label` | string | Normalised size label as printed on the garment |
+| `system` | string | The `size_system` that was applied (`US`, `EU`, or `JP`) |
+| `fit` | string | Effective fit |
+| `chest_cm` | number | Chest measurement in centimetres for this system and label |
 
-Chest measurements are flat, laid out, armpit to armpit, doubled. A garment
-measured on a body will read differently and is not what our spec sheets use.
+The `X-Printf-Size-System` response header echoes the effective system for the whole order.
+
+## Resolution order for bare labels
+
+If `size_system` is absent on a line **and** on the order, the API resolves it with this fallback chain:
+
+1. Line-level `size_system`
+2. Order-level `size_system`
+3. Account default
+4. Fulfilling facility default
+
+Step 4 depends on routing. If your account can route to more than one facility, the API cannot determine the facility before fulfilling, so it returns **`400 size_system_ambiguous`** instead of guessing. Single-facility accounts get a **`size_system_implicit`** warning today; that warning becomes a hard error in **2.6**.
+
+**Recommendation:** always supply `size_system` explicitly. Do not rely on the fallback chain.
+
+## Migration from 2.3.x {#migration}
+
+See the full migration note in the [2.4.0 changelog](../changelog.md#2-4-0).
