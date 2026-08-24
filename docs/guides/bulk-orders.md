@@ -1,44 +1,122 @@
 ---
 title: Bulk orders and templates
-section: guides
-last_reviewed: 2026-04-02
-owner: devex
-covers_endpoints: [POST /v2/orders]
-covers_sdks: [printf-js, printf-py]
+section: Guides
+last_reviewed: 2026-08-24
+owner: platform
+covers_endpoints:
+  - POST /v2/orders
+  - POST /v2/orders/bulk
+covers_sdks:
+  - printf-js
+  - printf-py
+  - printf-java
+  - printf-go
+  - printf-rb
 ---
 
 # Bulk orders and templates
 
-Conference orders are large, repetitive, and placed under time pressure. Saved
-templates exist so you are not rebuilding a 2,000-unit payload at midnight.
+Bulk orders let you submit many lines — or many orders — in a single request. Saved order templates let you reuse a base payload without repeating common fields.
 
-## Saving a template
+> **2.4.0 action required for templates.** Saved templates do not inherit the new `size_system` field automatically. If your templates omit `size_system`, orders submitted from them will hit the fallback resolution chain described in the [Sizing and fit](sizing.md) guide. Multi-facility accounts will receive `400 size_system_ambiguous`. Update your saved templates before upgrading to 2.4.0.
 
-Templates are configured in the dashboard, not the API. A template stores the
-line structure — designs, sizes, quantities, garment SKUs — and leaves the
-destination to be filled in per order.
+## Bulk order structure
+
+A bulk order is an array of standard order objects. Each object must include all required fields: `accountId`, `destination`, and at least one line with `designId`, `garmentSku`, and `quantity`.
+
+As of 2.4.0, you should also include `size_system` at the order level or on each line.
+
+```json
+POST /v2/orders/bulk
+[
+  {
+    "accountId": "acct_stackfest",
+    "size_system": "US",
+    "facilityId": "fac-atx",
+    "destination": {
+      "name": "StackFest Ops",
+      "line1": "410 Congress Ave",
+      "city": "Austin",
+      "region": "TX",
+      "postalCode": "78701",
+      "countryCode": "US"
+    },
+    "lines": [
+      {
+        "designId": "dsn_7fa91c",
+        "size": "M",
+        "size_system": "US",
+        "fit": "unisex",
+        "quantity": 100,
+        "garmentSku": "tee-classic-black"
+      },
+      {
+        "designId": "dsn_7fa91c",
+        "size": "XL",
+        "size_system": "US",
+        "fit": "unisex",
+        "quantity": 150,
+        "garmentSku": "tee-classic-black"
+      }
+    ]
+  }
+]
+```
+
+## Saved order templates
+
+Saved templates store a base order payload that you can reference by template ID at submission time. They are not visible in the catalog API — you manage them through the dashboard or the `/v2/order-templates` endpoints.
+
+### Updating templates for 2.4.0
+
+Templates created before 2.4.0 have no `size_system` field. When a template-based order is submitted:
+
+- If your account has a single fulfilling facility, the order resolves via facility default and emits a `size_system_implicit` warning.
+- If your account can route to more than one facility, the order is rejected with `400 size_system_ambiguous`.
+
+To update a saved template, retrieve it, add `size_system` at the order level (and optionally per line), then save it back. The template body follows the same shape as a direct POST:
 
 ```json
 {
   "accountId": "acct_stackfest",
-  "templateId": "tpl_booth_standard",
-  "destination": { "...": "..." }
+  "size_system": "US",
+  "destination": { ... },
+  "lines": [
+    {
+      "designId": "dsn_7fa91c",
+      "size": "XL",
+      "size_system": "US",
+      "fit": "unisex",
+      "quantity": 250,
+      "garmentSku": "tee-classic-black"
+    }
+  ]
 }
 ```
 
-## What a template does not store
+## Partial failure handling
 
-A template stores *what* to print, never *where*. Facility selection happens at
-order time, based on the destination you supply.
+Bulk submissions are validated line by line. If one order in the batch triggers `size_system_ambiguous`, that order is rejected and the rest of the batch proceeds. The response body lists each order's status and any error codes. Check `size_system_ambiguous` per order, not only at the top level.
 
-:::tip
-Re-run your template against the sandbox before a large event. A template that
-worked last year references design IDs and garment SKUs that may since have been
-retired.
-:::
+## Responses and webhooks
 
-## Limits
+Every fulfilled line now includes `resolved_size`:
 
-- 5,000 units per line
-- 40 lines per order
-- Templates do not expire, but the designs they reference can be archived
+```json
+{
+  "label": "XL",
+  "system": "US",
+  "fit": "unisex",
+  "chest_cm": 112
+}
+```
+
+Webhook payloads for order confirmation events carry the same `resolved_size` structure on each line. If you log or forward webhook payloads to a warehouse or fulfilment system, make sure those consumers can handle the new field without rejecting the event.
+
+## Error codes reference
+
+| Code | Status | Scope | Cause |
+|---|---|---|---|
+| `size_system_ambiguous` | 400 | Per order | Multi-facility account, no size system resolved |
+| `size_system_implicit` | warning | Per order | Single-facility account, resolved from facility default — becomes error in 2.6 |
+
