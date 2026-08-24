@@ -1,57 +1,122 @@
 ---
 title: Sizing and fit
 section: guides
-last_reviewed: 2026-05-14
-owner: devex
-covers_endpoints: [POST /v2/orders]
-covers_sdks: [printf-js, printf-py, printf-go, printf-java, printf-rb]
+last_reviewed: 2026-08-24
+owner: platform
+covers_endpoints:
+  - POST /v2/orders
+  - GET /v2/orders/{orderId}
+covers_sdks:
+  - printf-js
+  - printf-py
+  - printf-java
+  - printf-go
+  - printf-rb
 ---
 
 # Sizing and fit
 
-Every order line carries a `size`. Sizes use standard letter labels:
+As of **order-api 2.4**, every size label must be paired with an explicit size system, or must resolve to one through the fallback chain described below. Bare labels without a resolvable system are rejected.
 
-| Label | Chest (flat) |
-|---|---|
-| `XS`  | 86 cm  |
-| `S`   | 91 cm  |
-| `M`   | 97 cm  |
-| `L`   | 102 cm |
-| `XL`  | 112 cm |
-| `2XL` | 122 cm |
-| `3XL` | 132 cm |
+## Size systems
+
+| `size_system` value | Region | XL chest (cm) |
+|---|---|---|
+| `US` | United States / Canada | 112 |
+| `EU` | Europe | 107 |
+| `JP` | Japan | 97 |
+
+Ladders differ materially. A JP `XL` and a US `XL` are not the same garment. Always set the system explicitly; do not rely on implicit resolution in new integrations.
+
+## Setting the size system
+
+You can set `size_system` at two levels:
+
+- **Order level** — applies to every line that does not override it.
+- **Line level** — overrides the order-level value for that line only.
 
 ```json
+POST /v2/orders
 {
-  "designId": "dsn_7fa91c",
-  "size": "L",
-  "quantity": 250,
-  "garmentSku": "tee-classic-black"
+  "accountId": "acct_stackfest",
+  "size_system": "US",
+  "facilityId": "fac-atx",
+  "destination": {
+    "name": "StackFest Ops",
+    "line1": "410 Congress Ave",
+    "city": "Austin",
+    "region": "TX",
+    "postalCode": "78701",
+    "countryCode": "US"
+  },
+  "lines": [
+    {
+      "designId": "dsn_7fa91c",
+      "size": "XL",
+      "size_system": "US",
+      "fit": "unisex",
+      "quantity": 250,
+      "garmentSku": "tee-classic-black"
+    }
+  ]
 }
 ```
 
-## Picking sizes for an event
+## The `fit` field
 
-The distribution that works for most developer conferences:
+Each line item accepts a `fit` value:
 
-| Size | Share |
+| Value | Description |
 |---|---|
-| S   | 10% |
-| M   | 25% |
-| L   | 30% |
-| XL  | 20% |
-| 2XL | 10% |
-| 3XL | 5%  |
+| `unisex` | Standard unisex cut |
+| `fitted` | Contoured cut |
+| `relaxed` | Relaxed / oversized cut |
 
-Order 10% over your headcount. Attendees take a shirt for a colleague who could
-not make it, every single time.
+`fit` is optional. When omitted, the garment's default fit is used.
 
-## Fit
+## The `resolved_size` response object
 
-All garments are a classic unisex cut. If you need fitted or relaxed cuts, talk
-to your account manager — it is a per-order arrangement, not an API field.
+Every line in the order response and in webhook payloads includes `resolved_size`:
 
-## Measuring
+```json
+{
+  "label": "XL",
+  "system": "US",
+  "fit": "unisex",
+  "chest_cm": 112
+}
+```
 
-Chest measurements are flat, laid out, armpit to armpit, doubled. A garment
-measured on a body will read differently and is not what our spec sheets use.
+Use `resolved_size.chest_cm` to verify that the system resolved as you intended, especially when mixing US and EU lines in a single order.
+
+## The `X-Printf-Size-System` response header
+
+The response includes a header echoing the effective size system for the order:
+
+```
+X-Printf-Size-System: US
+```
+
+When lines use mixed systems the header reflects the order-level value. Log this header in your integration for auditability.
+
+## Fallback resolution chain
+
+When `size_system` is absent on a line, resolution proceeds in this order:
+
+1. `size_system` on the line
+2. `size_system` on the order
+3. The size system configured on the account
+4. The fulfilling facility's default
+
+Step 4 depends on routing, not on the payload. That makes it ambiguous for accounts that can route to more than one facility.
+
+## Error and warning codes
+
+| Code | HTTP status | Meaning | Action |
+|---|---|---|---|
+| `size_system_ambiguous` | 400 | Account routes to multiple facilities; no system could be resolved without guessing. | Set `size_system` explicitly on the order or per line. |
+| `size_system_implicit` | — (warning) | System resolved via account or facility default. Becomes a hard error in **2.6**. | Set `size_system` explicitly before upgrading to 2.6. |
+
+## Saved order templates
+
+Templates do not automatically inherit `size_system`. If you have saved templates that omit the field, they will trigger `size_system_implicit` warnings today and will fail in 2.6. Edit each template to add `size_system` at the order level or per line.
