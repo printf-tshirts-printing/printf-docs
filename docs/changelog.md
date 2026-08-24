@@ -7,6 +7,27 @@ owner: devex
 
 # Changelog
 
+## 2.4.0 — Size disambiguation
+
+**Breaking change.** `size` on an order line is no longer interpreted without an explicit size system.
+
+### What's new
+
+| Feature | Where it appears |
+|---|---|
+| `size_system` (`US` / `EU` / `JP`) | Request body (order level and per line) |
+| `fit` | Request body (per line) |
+| `resolved_size` | Response lines and webhook payloads |
+| `X-Printf-Size-System` | Response header |
+
+### Size resolution order
+
+When `size_system` is omitted on a line, the API resolves it in this order: line → order → account → fulfilling facility default. Accounts that can route to more than one facility are rejected with `400 size_system_ambiguous`; single-facility accounts receive a `size_system_implicit` warning. The warning becomes an error in **2.6**.
+
+### Why this matters
+
+Size ladders differ materially across systems. A JP `XL` has a 97 cm chest; a US `XL` has a 112 cm chest. Silent mismatches were shipping wrong garments.
+
 ## 2026-07-28 — Orders API 2.3.6
 Designs above 40 MB now fail fast with `art_too_large` instead of timing out.
 

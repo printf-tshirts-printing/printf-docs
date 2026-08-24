@@ -1,44 +1,97 @@
 ---
 title: Bulk orders and templates
 section: guides
-last_reviewed: 2026-04-02
-owner: devex
-covers_endpoints: [POST /v2/orders]
-covers_sdks: [printf-js, printf-py]
+last_reviewed: 2026-08-24
+owner: platform
+covers_endpoints:
+  - POST /v2/orders
+  - POST /v2/orders/bulk
+covers_sdks:
+  - printf-js
+  - printf-py
+  - printf-java
+  - printf-go
+  - printf-rb
 ---
 
 # Bulk orders and templates
 
-Conference orders are large, repetitive, and placed under time pressure. Saved
-templates exist so you are not rebuilding a 2,000-unit payload at midnight.
+Bulk orders and saved templates follow the same field rules as single orders. As of **2.4.0**, that includes the `size_system` requirement.
 
-## Saving a template
+## ⚠️ Template owners: action required before 2.6
 
-Templates are configured in the dashboard, not the API. A template stores the
-line structure — designs, sizes, quantities, garment SKUs — and leaves the
-destination to be filled in per order.
+Saved order templates are not visible in the API response for `GET /v2/orders` and are easy to overlook. If a template was saved before 2.4.0 it almost certainly lacks `size_system`. Those templates will:
+
+- **Now (2.4.0):** produce a `size_system_implicit` warning on every order created from the template.
+- **In 2.6:** be rejected with `400 size_system_ambiguous` or `400 size_system_implicit` (promoted to error).
+
+Audit your templates now. Add `size_system` at the order level (or per line if lines mix systems).
+
+## Sending a bulk order
+
+Each order in a bulk request is an independent object and must carry its own `size_system`, `accountId`, `destination`, and required line fields.
+
+```json
+POST /v2/orders/bulk
+[
+  {
+    "accountId": "acct_stackfest",
+    "size_system": "US",
+    "facilityId": "fac-atx",
+    "destination": {
+      "name": "StackFest Ops",
+      "line1": "410 Congress Ave",
+      "city": "Austin",
+      "region": "TX",
+      "postalCode": "78701",
+      "countryCode": "US"
+    },
+    "lines": [
+      {
+        "designId": "dsn_7fa91c",
+        "size": "XL",
+        "size_system": "US",
+        "fit": "unisex",
+        "quantity": 250,
+        "garmentSku": "tee-classic-black"
+      }
+    ]
+  }
+]
+```
+
+## Mixed size systems in a bulk request
+
+Different orders in the same bulk request can use different size systems — set `size_system` independently on each order object, or per line within each order.
+
+| Scenario | Recommended approach |
+|---|---|
+| All lines same system | Set `size_system` once at the order level |
+| Lines mix US and EU | Set order-level to majority, override with line-level |
+| Lines mix US and JP | Set explicitly per line — the 15 cm chest difference is too large to risk implicit resolution |
+
+## Reading `resolved_size` in bulk responses
+
+Each line in the bulk response carries a `resolved_size` object:
 
 ```json
 {
-  "accountId": "acct_stackfest",
-  "templateId": "tpl_booth_standard",
-  "destination": { "...": "..." }
+  "label": "XL",
+  "system": "US",
+  "fit": "unisex",
+  "chest_cm": 112
 }
 ```
 
-## What a template does not store
+Validate `system` and `chest_cm` against your order intent before treating the batch as accepted. A mismatch here means the size resolved differently than you expected — correct and resubmit.
 
-A template stores *what* to print, never *where*. Facility selection happens at
-order time, based on the destination you supply.
+## Error reference
 
-:::tip
-Re-run your template against the sandbox before a large event. A template that
-worked last year references design IDs and garment SKUs that may since have been
-retired.
-:::
+| Code | Status | Meaning |
+|---|---|---|
+| `size_system_ambiguous` | `400` | Account routes to multiple facilities; `size_system` cannot be inferred. Set it explicitly. |
+| `size_system_implicit` | warning → `400` in 2.6 | `size_system` was inferred from account or facility default. Add it explicitly. |
 
-## Limits
+## SDK notes
 
-- 5,000 units per line
-- 40 lines per order
-- Templates do not expire, but the designs they reference can be archived
+All five client libraries (printf-js, printf-py, printf-java, printf-go, printf-rb) have been updated for 2.4.0. Upgrade to the 2.4.x release of your library to get typed `size_system`, `fit`, and `resolved_size` fields. Earlier library versions will send and receive these fields as untyped strings or generic maps.
