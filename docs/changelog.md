@@ -7,6 +7,41 @@ owner: devex
 
 # Changelog
 
+## 2.4.0 — Size disambiguation (breaking)
+
+**Released:** 2026-08-24
+
+### Breaking changes
+
+- `size` on order lines is no longer resolved without an explicit size system. Requests that omit `size_system` on both the line and the order body and that route to more than one facility are rejected with **`400 size_system_ambiguous`**.
+
+### New fields
+
+| Location | Field | Type | Notes |
+|---|---|---|---|
+| Order body | `size_system` | `US` \| `EU` \| `JP` | Default for all lines |
+| Order line | `size_system` | `US` \| `EU` \| `JP` | Overrides order-level value |
+| Order line | `fit` | string | e.g. `unisex`, `womens`, `mens` |
+| Response line | `resolved_size` | object | `{ label, system, fit, chest_cm }` |
+
+### New response header
+
+`X-Printf-Size-System` — the effective size system used to resolve the order.
+
+### Deprecation warning
+
+Single-facility accounts that omit `size_system` receive a `size_system_implicit` warning in 2.4. This warning becomes a hard error in **2.6**.
+
+### SDK versions shipping with this release
+
+| Library | Version |
+|---|---|
+| printf-js | 2.4.0 |
+| printf-py | 2.4.0 |
+| printf-java | 2.4.0 |
+| printf-go | 2.4.0 |
+| printf-rb | 2.4.0 |
+
 ## 2026-07-28 — Orders API 2.3.6
 Designs above 40 MB now fail fast with `art_too_large` instead of timing out.
 
