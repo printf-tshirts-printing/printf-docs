@@ -7,6 +7,35 @@ owner: devex
 
 # Changelog
 
+## order-api 2.4.0 — Size disambiguation
+
+**Released:** 2026-08-24
+
+### Breaking change
+
+`size` fields on order lines are no longer interpreted without an explicit size system. Requests that omit `size_system` on both the order and the affected line are rejected with `400 size_system_ambiguous` if the account can route to more than one facility. Single-facility accounts receive a `size_system_implicit` warning today; this becomes a hard error in 2.6.
+
+### What's new
+
+| Field / header | Where | Notes |
+|---|---|---|
+| `size_system` | Order root + each line | Accepted values: `US`, `EU`, `JP` |
+| `fit` | Each line | e.g. `unisex`, `womens`, `mens` |
+| `resolved_size` | Response lines + webhook payloads | `{ "label", "system", "fit", "chest_cm" }` |
+| `X-Printf-Size-System` | Response header | The system applied to the order |
+
+### Why it matters
+
+Size ladders differ materially across systems. A JP `XL` chest is 97 cm; a US `XL` is 112 cm. Silent mis-routing was producing wrong-size fulfillment with no error signal.
+
+### Affected client libraries
+
+`printf-js`, `printf-py`, `printf-java`, `printf-go`, `printf-rb` — update to the 2.4.x release of your library before deploying integrations against this API version.
+
+### Keynote accounts
+
+StackFest, Cloud Native Rodeo, ObservaCon, KubeSummit, and ShipItConf are on this release. If you are on a managed plan, contact support before 2.6 ships to avoid order rejections.
+
 ## 2026-07-28 — Orders API 2.3.6
 Designs above 40 MB now fail fast with `art_too_large` instead of timing out.
 
