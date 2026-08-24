@@ -7,6 +7,39 @@ owner: devex
 
 # Changelog
 
+## order-api 2.4.0 — Size disambiguation (breaking)
+
+**Released:** 2026-08-24
+
+### What changed
+
+Size labels are no longer interpreted without an explicit size system. This is a **breaking change** for any caller that sends a bare `size` without `size_system`.
+
+### New fields
+
+| Location | Field | Type | Values |
+|---|---|---|---|
+| Request (order) | `size_system` | string | `US` \| `EU` \| `JP` |
+| Request (line) | `size_system` | string | `US` \| `EU` \| `JP` |
+| Request (line) | `fit` | string | e.g. `unisex`, `womens`, `mens` |
+| Response / webhook (line) | `resolved_size` | object | `{ label, system, fit, chest_cm }` |
+| Response header | `X-Printf-Size-System` | string | The system used to resolve all lines |
+
+### New error and warning codes
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `size_system_ambiguous` | 400 | No `size_system` provided and account can route to more than one facility |
+| `size_system_implicit` | — (warning) | No `size_system` provided; resolved from single-facility default. Becomes an error in 2.6 |
+
+### Why this matters
+
+Size ladders differ materially between systems. A JP `XL` chest is **97 cm**; a US `XL` chest is **112 cm**. Silent mis-resolution was shipping garments in the wrong size.
+
+### Affected SDKs
+
+`printf-js` · `printf-py` · `printf-java` · `printf-go` · `printf-rb` — update to the 2.4.x release of your client library.
+
 ## 2026-07-28 — Orders API 2.3.6
 Designs above 40 MB now fail fast with `art_too_large` instead of timing out.
 
