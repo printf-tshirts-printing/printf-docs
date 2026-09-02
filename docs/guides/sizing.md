@@ -1,57 +1,100 @@
 ---
 title: Sizing and fit
 section: guides
-last_reviewed: 2026-05-14
+last_reviewed: 2026-09-02
 owner: devex
 covers_endpoints: [POST /v2/orders]
-covers_sdks: [printf-js, printf-py, printf-go, printf-java, printf-rb]
+covers_sdks: [printf-js, printf-py, printf-java, printf-go, printf-rb]
 ---
 
 # Sizing and fit
 
-Every order line carries a `size`. Sizes use standard letter labels:
+Orders API 2.4.0 introduces explicit size systems and fit, and **breaks** any integration that omits `size_system` on an account routed to more than one facility. Read this page before upgrading.
 
-| Label | Chest (flat) |
-|---|---|
-| `XS`  | 86 cm  |
-| `S`   | 91 cm  |
-| `M`   | 97 cm  |
-| `L`   | 102 cm |
-| `XL`  | 112 cm |
-| `2XL` | 122 cm |
-| `3XL` | 132 cm |
+## Size systems
+
+| `size_system` | Chest at XL | Notes |
+|---|---|---|
+| `US` | 112 cm | Default for most North American facilities |
+| `EU` | 107 cm | |
+| `JP` | 97 cm | |
+
+The systems are not interchangeable. Sending a bare `XL` without a system and letting the facility default resolve it was always ambiguous; as of 2.4.0 it is an error for any account that can route to more than one facility.
+
+## Fields added in 2.4.0
+
+| Field | Location | Type | Description |
+|---|---|---|---|
+| `size_system` | order root | `US` \| `EU` \| `JP` | Applies to every line that omits its own `size_system` |
+| `size_system` | line | `US` \| `EU` \| `JP` | Overrides the order-level value for this line |
+| `fit` | line | `unisex` \| `mens` \| `womens` | Optional. Defaults to `unisex` |
+| `resolved_size` | response line | object | See below |
+| `X-Printf-Size-System` | response header | string | The system that was applied |
+
+### `resolved_size` object
 
 ```json
-{
-  "designId": "dsn_7fa91c",
-  "size": "L",
-  "quantity": 250,
-  "garmentSku": "tee-classic-black"
-}
+{ "label": "XL", "system": "US", "fit": "unisex", "chest_cm": 112 }
 ```
 
-## Picking sizes for an event
+`resolved_size` also appears in webhook payloads for `order.confirmed` and `order.shipped` events.
 
-The distribution that works for most developer conferences:
+## Resolution order
 
-| Size | Share |
-|---|---|
-| S   | 10% |
-| M   | 25% |
-| L   | 30% |
-| XL  | 20% |
-| 2XL | 10% |
-| 3XL | 5%  |
+When `size_system` is present on a line, that value is used. Otherwise the API walks this chain:
 
-Order 10% over your headcount. Attendees take a shirt for a colleague who could
-not make it, every single time.
+1. `size_system` on the order root
+2. `size_system` on the account record
+3. The fulfilling facility's default
 
-## Fit
+Step 3 depends on routing, not on the payload. If the account can route to more than one facility, the facility is not known at validation time and the request is rejected with `400 size_system_ambiguous`.
 
-All garments are a classic unisex cut. If you need fitted or relaxed cuts, talk
-to your account manager — it is a per-order arrangement, not an API field.
+## Error and warning codes
 
-## Measuring
+| Code | Status | Meaning | Introduced |
+|---|---|---|---|
+| `size_system_ambiguous` | `400` | Order omits `size_system` and the account routes to more than one facility | 2.4.0 |
+| `size_system_implicit` | Warning header | Order resolved `size_system` from a facility default; single-facility accounts only | 2.4.0 |
 
-Chest measurements are flat, laid out, armpit to armpit, doubled. A garment
-measured on a body will read differently and is not what our spec sheets use.
+`size_system_implicit` becomes a `400` error in **2.6**.
+
+---
+
+## Migrating saved templates {#migrating-saved-templates}
+
+Saved order templates created before 2.4.0 carry no `size_system`. Submitting one unmodified against an account that routes to more than one facility will return `400 size_system_ambiguous`.
+
+**Who is affected:** Any account that (a) uses saved order templates and (b) is configured to route to more than one fulfilment facility. Five Keynote accounts fall into this category: StackFest, Cloud Native Rodeo, ObservaCon, KubeSummit, and ShipItConf.
+
+**What to do:** Add `size_system` at the order level of every saved template. A per-line override is only needed where a single order mixes systems.
+
+```diff
+  {
+    "accountId": "acct_stackfest",
++   "size_system": "US",
+    "facilityId": "fac-atx",
+    "destination": {
+      "name": "StackFest Ops",
+      "line1": "410 Congress Ave",
+      "city": "Austin",
+      "region": "TX",
+      "postalCode": "78701",
+      "countryCode": "US"
+    },
+    "lines": [
+      {
+        "designId": "dsn_7fa91c",
+        "size": "XL",
+        "fit": "unisex",
+        "quantity": 250,
+        "garmentSku": "tee-classic-black"
+      }
+    ]
+  }
+```
+
+**What happens if you do nothing:** The first order submission against a multi-facility account returns `400 size_system_ambiguous` and is rejected. Nothing is printed; nothing is charged. The fix is a one-field addition to the template.
+
+:::warning
+Even single-facility accounts should add `size_system` now. The `size_system_implicit` warning becomes a `400` error in **2.6**. An account that moves to a second facility between now and 2.6 will start seeing `size_system_ambiguous` immediately.
+:::
