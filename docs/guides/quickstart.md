@@ -4,20 +4,22 @@ section: guides
 last_reviewed: 2026-09-02
 owner: devex
 covers_endpoints: [POST /v2/orders]
-covers_sdks: [printf-js, printf-py, printf-java, printf-go, printf-rb]
+covers_sdks: [printf-js, printf-py, printf-go, printf-java, printf-rb]
 ---
 
 # Quickstart
 
-Place your first order in under five minutes.
+This guide gets you from zero to your first confirmed order in under ten minutes.
 
 ## Prerequisites
 
-- An API key from your account dashboard
-- A design ID (`dsn_…`) from a completed design upload
-- Your account ID (`acct_…`)
+- A Printf account and API key. Sign up at [printf.dev](https://printf.dev).
+- Your account ID (`acct_…`) from the dashboard.
+- A facility ID (`fac-…`) — find it under **Settings → Facilities**.
 
-## Place an order
+## Your first order
+
+As of Orders API 2.4.0, every order requires an explicit `size_system`. The values are `US`, `EU`, and `JP`.
 
 ```bash
 curl -X POST https://api.printf.dev/v2/orders \
@@ -39,37 +41,60 @@ curl -X POST https://api.printf.dev/v2/orders \
       {
         "designId": "dsn_7fa91c",
         "size": "XL",
+        "size_system": "US",
         "fit": "unisex",
-        "quantity": 250,
+        "quantity": 1,
         "garmentSku": "tee-classic-black"
       }
     ]
   }'
 ```
 
-`size_system` is required at the order level (or per line). Omitting it on a multi-facility account returns `400 size_system_ambiguous`. See [Sizing and fit](/guides/sizing) for the full reference.
-
-## Read the response
+A `200` response means the order is confirmed. Each line carries `resolved_size`:
 
 ```json
 {
-  "orderId": "ord_abc123",
-  "status": "confirmed",
-  "lines": [
-    {
-      "designId": "dsn_7fa91c",
-      "quantity": 250,
-      "garmentSku": "tee-classic-black",
-      "resolved_size": { "label": "XL", "system": "US", "fit": "unisex", "chest_cm": 112 }
-    }
-  ]
+  "label": "XL",
+  "system": "US",
+  "fit": "unisex",
+  "chest_cm": 112
 }
 ```
 
-The `resolved_size` object on each line confirms what the facility will cut. The `X-Printf-Size-System` response header echoes the system applied to the order.
+The response header `X-Printf-Size-System` confirms the system applied to the order.
+
+## What each field does
+
+| Field | Required | Notes |
+|---|---|---|
+| `accountId` | Yes | Your account identifier. |
+| `size_system` | Yes (from 2.4.0) | `US`, `EU`, or `JP`. Set at order level, line level, or both. Line takes precedence. |
+| `facilityId` | Yes | The fulfilling facility. |
+| `destination` | Yes | Shipping address. |
+| `lines[].designId` | Yes | The design to print. |
+| `lines[].size` | Yes | Size label within the chosen system. |
+| `lines[].fit` | No | Fit variant. Defaults to SKU default if omitted. |
+| `lines[].quantity` | Yes | Units to produce. |
+| `lines[].garmentSku` | Yes | The garment to print on. |
+
+## Size systems at a glance
+
+| Value | Standard | XL chest |
+|---|---|---|
+| `US` | US/CA unisex | 112 cm |
+| `EU` | European | 104 cm |
+| `JP` | Japanese Industrial Standard | 97 cm |
+
+The systems are not interchangeable. A JP `XL` is 15 cm narrower than a US `XL`. Always confirm which system your garments are measured in before placing an order.
+
+## If you receive a 400
+
+`400 size_system_ambiguous` means your account can route to more than one facility and no `size_system` was present on the order or line. Add `size_system` to the request.
+
+Single-facility accounts that omit `size_system` receive a `size_system_implicit` warning in the response rather than a 400. This becomes a 400 in 2.6 — add `size_system` before then.
 
 ## Next steps
 
-- [Bulk orders and templates](/guides/bulk-orders) — place up to 500 lines in a single request
-- [Sizing and fit](/guides/sizing) — size system reference, fit options, and the migration guide for saved templates
-- [Webhooks](/guides/webhooks) — receive `order.confirmed` and `order.shipped` events, which now include `resolved_size` per line
+- [Sizing and fit](/guides/sizing) — full size ladder reference and migration guide.
+- [Bulk orders and templates](/guides/bulk-orders) — how to update saved templates before 2.6.
+- [Webhooks](/guides/webhooks) — `resolved_size` now appears in `order.created` and `order.updated` payloads.
