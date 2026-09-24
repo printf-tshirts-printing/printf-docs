@@ -7,6 +7,19 @@ owner: devex
 
 # Changelog
 
+## 2026-09-24 — Orders API 2.4.0
+
+**Size disambiguation — breaking change for multi-facility accounts.**
+
+- **Breaking:** Accounts that can route to more than one facility now receive `400 size_system_ambiguous` when `size_system` is absent. Previously the fulfilling facility's default was applied silently.
+- `POST /v2/orders` accepts `size_system` (`US`, `EU`, `JP`) at the order level and per line; `fit` is accepted per line.
+- Responses and webhook payloads carry `resolved_size` per line (`label`, `system`, `fit`, `chest_cm`).
+- New `X-Printf-Size-System` response header reflects the system applied.
+- Single-facility accounts receive a `size_system_implicit` warning today; this becomes an error in 2.6.
+- Ladders differ materially: JP `XL` = 97 cm, US `XL` = 112 cm — an implicit resolution is a sizing error, not a preference.
+
+[Migration guide](/guides/sizing#migrating-saved-templates)
+
 ## 2026-09-02 — Orders API 2.4.0
 
 **Size disambiguation. Breaking change for accounts routing to more than one facility.**
