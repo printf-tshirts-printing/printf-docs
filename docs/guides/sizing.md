@@ -1,7 +1,7 @@
 ---
 title: Sizing and fit
 section: guides
-last_reviewed: 2026-09-02
+last_reviewed: 2026-11-11
 owner: devex
 covers_endpoints: [POST /v2/orders]
 covers_sdks: [printf-js, printf-py, printf-go, printf-java, printf-rb]
@@ -9,25 +9,47 @@ covers_sdks: [printf-js, printf-py, printf-go, printf-java, printf-rb]
 
 # Sizing and fit
 
-As of Orders API 2.4.0, every order must carry an explicit `size_system`. Bare size labels are no longer resolved by the fulfilling facility's default.
+Breaking change in order-api 2.4.0: `size` is no longer interpreted without a system. If your account can route to more than one facility, an order with a bare size label is rejected with `400 size_system_ambiguous`. If you have saved order templates, see [Migrating saved templates](#migrating-saved-templates).
 
-:::danger
-Accounts that can route to more than one facility will receive `400 size_system_ambiguous` if `size_system` is absent. Single-facility accounts receive a `size_system_implicit` warning today; this becomes a hard error in 2.6.
-:::
+## Why the system matters
 
-## Supported size systems
+Size ladders differ between systems. The same label is a different garment.
 
-| Value | Standard | Example XL chest |
+| Label | System | Chest |
 |---|---|---|
-| `US` | US/CA unisex | 112 cm |
-| `EU` | European | 104 cm |
-| `JP` | Japanese Industrial Standard | 97 cm |
+| `XL` | `US` | 112 cm |
+| `XL` | `JP` | 97 cm |
 
-A JP `XL` and a US `XL` differ by 15 cm. Omitting `size_system` does not mean "any system" — it means "guess", and guessing is now an error for multi-facility accounts.
+## Fields
 
-## Specifying size system
+| Field | Where | Values | Notes |
+|---|---|---|---|
+| `size_system` | Order and each line | `US`, `EU`, `JP` | A line value overrides the order value. |
+| `fit` | Each line | for example `unisex` | Resolved and echoed back in `resolved_size`. |
+| `resolved_size` | Each response line and webhook payload | object | What was actually ordered. |
+| `X-Printf-Size-System` | Response header | `US`, `EU`, `JP` | The system applied to the order. |
 
-`size_system` may be set at the order level, at the line level, or both. The line value takes precedence over the order value.
+## How a bare size resolves
+
+If a line has only `size`, the system is taken from the first source below that has a value.
+
+| Order | Source |
+|---|---|
+| 1 | `size_system` on the line |
+| 2 | `size_system` on the order |
+| 3 | The account's `size_system` |
+| 4 | The fulfilling facility's default |
+
+The last rule depends on routing, not on your payload. That is why the API does not apply it for accounts that can route to more than one facility.
+
+## Error and warning codes
+
+| Code | Who gets it | Meaning |
+|---|---|---|
+| `size_system_ambiguous` | Accounts that can route to more than one facility (`400`) | A bare size could not be resolved without guessing. Send `size_system`. |
+| `size_system_implicit` | Accounts that route to a single facility (warning) | The size resolved to the facility default. Becomes an error in 2.6. |
+
+## Example
 
 ```json
 POST /v2/orders
@@ -56,50 +78,31 @@ POST /v2/orders
 }
 ```
 
-The line-level `size_system` overrides the order-level value for that line. Use the order-level field when every line shares a system; use line-level when mixing systems in a single order.
-
-## fit
-
-`fit` is accepted per line. Supported values depend on the garment SKU. Omitting `fit` leaves the fit at the SKU's default — check the product catalogue if you are unsure what that default is.
-
-## resolved_size
-
-Every line in the response carries `resolved_size`:
+Each response line carries `resolved_size`:
 
 ```json
-{
-  "label": "XL",
-  "system": "US",
-  "fit": "unisex",
-  "chest_cm": 112
-}
+{ "label": "XL", "system": "US", "fit": "unisex", "chest_cm": 112 }
 ```
 
-`resolved_size` also appears in webhook payloads for `order.created` and `order.updated` events.
+Compare `chest_cm` with what you meant to order before the order is fulfilled.
 
-## X-Printf-Size-System response header
+## Migrating saved templates
 
-The response carries `X-Printf-Size-System` reflecting the system applied to the order. When lines carry mixed systems, the header reflects the order-level system; per-line resolution is in `resolved_size`.
+Saved order templates created before 2.4.0 carry no explicit `size_system`. They are invisible from the API, so they are easy to forget.
 
-## Error reference
+:::warning
+A saved template with no `size_system` fails with `400 size_system_ambiguous` on a multi-facility account. On a single-facility account it resolves to the facility default and returns `size_system_implicit`, and that becomes an error in 2.6. If the facility default is not the system you meant, the order arrives in the wrong size.
+:::
 
-| Code | HTTP status | Meaning |
-|---|---|---|
-| `size_system_ambiguous` | 400 | No `size_system` on the order or line; account routes to more than one facility. Add `size_system`. |
-| `size_system_implicit` | Warning (200) | No `size_system`; single-facility account. Will become 400 in 2.6. |
+For each saved template:
 
----
+1. Set `size_system` on the template's order.
+2. Set `size_system` on any line that uses a different system from the order.
+3. Place a test order from the template and check `resolved_size` on every line.
 
-## Migrating to explicit size_system {#migrating-to-explicit-size-system}
-
-**What changed.** `POST /v2/orders` no longer resolves a bare size label using the fulfilling facility's default. You must supply `size_system` on the order or on each line.
-
-**Who is affected.** Any integration that submits orders without an explicit `size_system`, and any saved order template created before 2.4.0. Multi-facility accounts receive a hard `400` today. Single-facility accounts receive a warning now and a hard error in 2.6.
-
-**What to do.**
+Before and after:
 
 ```diff
-  POST /v2/orders
   {
     "accountId": "acct_stackfest",
 +   "size_system": "US",
@@ -113,18 +116,8 @@ The response carries `X-Printf-Size-System` reflecting the system applied to the
       "countryCode": "US"
     },
     "lines": [
-      {
-        "designId": "dsn_7fa91c",
-        "size": "XL",
-+       "size_system": "US",
-+       "fit": "unisex",
-        "quantity": 250,
-        "garmentSku": "tee-classic-black"
-      }
+      { "designId": "dsn_7fa91c", "size": "XL", "quantity": 250, "garmentSku": "tee-classic-black" }
     ]
   }
 ```
 
-**Saved order templates.** Templates created before 2.4.0 carry no `size_system`. They will resolve via the implicit-warning path today and fail in 2.6. Retrieve each template, add `size_system` at the order level (and optionally per line), and save it back. There is no bulk migration endpoint — each template must be updated individually.
-
-**What happens if you do nothing.** Multi-facility accounts fail immediately with `400 size_system_ambiguous`. Single-facility accounts continue to work with a `size_system_implicit` warning in the response until 2.6, when the same request becomes a `400`.

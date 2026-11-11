@@ -1,7 +1,7 @@
 ---
 title: Bulk orders and templates
 section: guides
-last_reviewed: 2026-09-02
+last_reviewed: 2026-11-11
 owner: devex
 covers_endpoints: [POST /v2/orders]
 covers_sdks: [printf-js, printf-py, printf-go, printf-java, printf-rb]
@@ -9,13 +9,21 @@ covers_sdks: [printf-js, printf-py, printf-go, printf-java, printf-rb]
 
 # Bulk orders and templates
 
-:::danger
-Saved order templates created before Orders API 2.4.0 carry no `size_system`. They will produce a `size_system_implicit` warning on submission today and a `400` error from 2.6 onward. Update every template before upgrading, or before 2.6 ships — whichever comes first.
-:::
+Breaking change in order-api 2.4.0: bulk orders and saved templates that send a bare `size` stop working on multi-facility accounts. They are rejected with `400 size_system_ambiguous`. On single-facility accounts they return a `size_system_implicit` warning, which becomes an error in 2.6.
 
-## Sending a bulk order
+## Who needs to act
 
-Bulk orders follow the same `POST /v2/orders` shape as single orders. Each line is an independent entry in the `lines` array. As of 2.4.0, `size_system` is required on the order or on every line.
+| Your setup | Effect in 2.4.0 | Action |
+|---|---|---|
+| Account can route to more than one facility | `400 size_system_ambiguous` | Send `size_system` on every order. |
+| Account routes to a single facility | `size_system_implicit` warning | Send `size_system` before 2.6. |
+| Saved templates created before 2.4.0 | No explicit `size_system` | Update each template. See [Migrating saved templates](/guides/sizing#migrating-saved-templates). |
+
+## Mixing size systems in one order
+
+Set `size_system` on the order for the common case. Override it on a line that differs. A line value wins over the order value.
+
+The example below orders 250 US `XL` and 40 JP `XL`. These are different garments: a US `XL` is 112 cm chest and a JP `XL` is 97 cm.
 
 ```json
 POST /v2/orders
@@ -34,90 +42,45 @@ POST /v2/orders
   "lines": [
     {
       "designId": "dsn_7fa91c",
-      "size": "S",
-      "size_system": "US",
+      "size": "XL",
       "fit": "unisex",
-      "quantity": 50,
+      "quantity": 250,
       "garmentSku": "tee-classic-black"
     },
     {
       "designId": "dsn_7fa91c",
-      "size": "M",
-      "size_system": "US",
+      "size": "XL",
+      "size_system": "JP",
       "fit": "unisex",
-      "quantity": 120,
-      "garmentSku": "tee-classic-black"
-    },
-    {
-      "designId": "dsn_7fa91c",
-      "size": "L",
-      "size_system": "US",
-      "fit": "unisex",
-      "quantity": 80,
+      "quantity": 40,
       "garmentSku": "tee-classic-black"
     }
   ]
 }
 ```
 
-Each line in the response will carry `resolved_size` confirming the system and chest measurement applied:
+The first line has no `size_system`, so it takes the order's `US`. The second line overrides it with `JP`.
 
-```json
-{
-  "label": "L",
-  "system": "US",
-  "fit": "unisex",
-  "chest_cm": 107
-}
-```
+## Checking what you ordered
 
-## Mixed size systems in a single order
+Every response line, and every webhook payload for the order, carries `resolved_size`:
 
-You can mix size systems across lines by omitting the order-level `size_system` and specifying it per line. Every line must then carry its own `size_system`; an order with some lines missing it and no order-level default will be rejected with `400 size_system_ambiguous` on multi-facility accounts.
+| Field | Example |
+|---|---|
+| `label` | `XL` |
+| `system` | `US` |
+| `fit` | `unisex` |
+| `chest_cm` | `112` |
 
-## Saved order templates
+For a bulk order, compare `chest_cm` on each line with what you meant before the order is fulfilled. The response also carries an `X-Printf-Size-System` header.
 
-### What templates stored before 2.4.0
+## Saved templates
 
-Templates saved before 2.4.0 contain a size label (`S`, `M`, `L`, `XL`, `XXL`) but no `size_system`. When you submit one today, the API applies the `size_system_implicit` warning path — the facility default is used if the account routes to a single facility. This becomes a `400` in 2.6.
+Templates created before 2.4.0 carry no explicit `size_system`.
 
-### Updating your templates
+:::warning
+A template without `size_system` either fails (multi-facility accounts) or quietly resolves to the fulfilling facility's default (single-facility accounts). That default may not be the system your team means.
+:::
 
-There is no bulk migration endpoint. For each saved template:
+For each template, set `size_system` on the order and on any line that differs, then place a test order and check `resolved_size`. The full steps and a before/after diff are in [Migrating saved templates](/guides/sizing#migrating-saved-templates).
 
-1. Retrieve the template.
-2. Add `size_system` at the order level — use whichever system your garments are sized in.
-3. Optionally add `size_system` and `fit` per line for finer control.
-4. Save the template back.
-
-```diff
-  {
-    "accountId": "acct_stackfest",
-+   "size_system": "US",
-    "lines": [
-      {
-        "designId": "dsn_7fa91c",
-        "size": "XL",
-+       "size_system": "US",
-+       "fit": "unisex",
-        "quantity": 250,
-        "garmentSku": "tee-classic-black"
-      }
-    ]
-  }
-```
-
-### Verifying the update
-
-After saving the updated template, submit a test order (or a dry-run if your account has that capability enabled) and confirm that:
-
-- The response does **not** contain a `size_system_implicit` warning.
-- Each line's `resolved_size.system` matches the system you specified.
-- `resolved_size.chest_cm` matches the ladder for that system (US `XL` = 112 cm, JP `XL` = 97 cm).
-
-## Error reference
-
-| Code | HTTP status | Meaning |
-|---|---|---|
-| `size_system_ambiguous` | 400 | No `size_system` resolvable; account routes to more than one facility. |
-| `size_system_implicit` | Warning (200) | No `size_system`; single-facility account. Becomes 400 in 2.6. |
