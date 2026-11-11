@@ -1,7 +1,7 @@
 ---
 title: Quickstart
 section: guides
-last_reviewed: 2026-09-02
+last_reviewed: 2026-11-11
 owner: devex
 covers_endpoints: [POST /v2/orders]
 covers_sdks: [printf-js, printf-py, printf-go, printf-java, printf-rb]
@@ -9,92 +9,66 @@ covers_sdks: [printf-js, printf-py, printf-go, printf-java, printf-rb]
 
 # Quickstart
 
-This guide gets you from zero to your first confirmed order in under ten minutes.
+This page takes you to your first order. As of Orders API 2.4.0, every order must say which size system its `size` labels use. A bare `size` such as `XL` returns `400 size_system_ambiguous` if your account can route to more than one facility. If your account routes to a single facility, it succeeds with a `size_system_implicit` warning that becomes an error in 2.6.
 
-## Prerequisites
+## Place an order
 
-- A Printf account and API key. Sign up at [printf.dev](https://printf.dev).
-- Your account ID (`acct_…`) from the dashboard.
-- A facility ID (`fac-…`) — find it under **Settings → Facilities**.
-
-## Your first order
-
-As of Orders API 2.4.0, every order requires an explicit `size_system`. The values are `US`, `EU`, and `JP`.
-
-```bash
-curl -X POST https://api.printf.dev/v2/orders \
-  -H "Authorization: Bearer $PRINTF_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "accountId": "acct_stackfest",
-    "size_system": "US",
-    "facilityId": "fac-atx",
-    "destination": {
-      "name": "StackFest Ops",
-      "line1": "410 Congress Ave",
-      "city": "Austin",
-      "region": "TX",
-      "postalCode": "78701",
-      "countryCode": "US"
-    },
-    "lines": [
-      {
-        "designId": "dsn_7fa91c",
-        "size": "XL",
-        "size_system": "US",
-        "fit": "unisex",
-        "quantity": 1,
-        "garmentSku": "tee-classic-black"
-      }
-    ]
-  }'
-```
-
-A `200` response means the order is confirmed. Each line carries `resolved_size`:
+`POST /v2/orders`
 
 ```json
 {
-  "label": "XL",
-  "system": "US",
-  "fit": "unisex",
-  "chest_cm": 112
+  "accountId": "acct_stackfest",
+  "size_system": "US",
+  "destination": {
+    "name": "StackFest Ops",
+    "line1": "410 Congress Ave",
+    "city": "Austin",
+    "region": "TX",
+    "postalCode": "78701",
+    "countryCode": "US"
+  },
+  "lines": [
+    {
+      "designId": "dsn_7fa91c",
+      "size": "XL",
+      "size_system": "US",
+      "fit": "unisex",
+      "quantity": 250,
+      "garmentSku": "tee-classic-black"
+    }
+  ]
 }
 ```
 
-The response header `X-Printf-Size-System` confirms the system applied to the order.
-
-## What each field does
-
 | Field | Required | Notes |
 |---|---|---|
-| `accountId` | Yes | Your account identifier. |
-| `size_system` | Yes (from 2.4.0) | `US`, `EU`, or `JP`. Set at order level, line level, or both. Line takes precedence. |
-| `facilityId` | Yes | The fulfilling facility. |
-| `destination` | Yes | Shipping address. |
-| `lines[].designId` | Yes | The design to print. |
-| `lines[].size` | Yes | Size label within the chosen system. |
-| `lines[].fit` | No | Fit variant. Defaults to SKU default if omitted. |
-| `lines[].quantity` | Yes | Units to produce. |
-| `lines[].garmentSku` | Yes | The garment to print on. |
+| `accountId` | Yes | Your account. |
+| `destination` | Yes | Where the order ships. |
+| `designId` | Yes, per line | The design to print. |
+| `garmentSku` | Yes, per line | The garment. |
+| `quantity` | Yes, per line | Units on this line. |
+| `size_system` | Yes in practice | `US`, `EU` or `JP`. Set it on the order, and on a line only to override the order value. |
+| `size` | Per line | A label on the ladder named by `size_system`. |
+| `fit` | Optional, per line | For example `unisex`. |
 
-## Size systems at a glance
+Use the same field names with any Printf client library: printf-js, printf-py, printf-go, printf-java or printf-rb.
 
-| Value | Standard | XL chest |
+## Check the size that was ordered
+
+The ladders differ. A JP `XL` is 97 cm and a US `XL` is 112 cm. Each response line carries `resolved_size`:
+
+```json
+{ "label": "XL", "system": "US", "fit": "unisex", "chest_cm": 112 }
+```
+
+Responses also carry an `X-Printf-Size-System` header.
+
+## If your order fails
+
+| Code | Meaning | Fix |
 |---|---|---|
-| `US` | US/CA unisex | 112 cm |
-| `EU` | European | 104 cm |
-| `JP` | Japanese Industrial Standard | 97 cm |
+| `size_system_ambiguous` | `400`. Your account can route to more than one facility, and a bare label cannot be resolved. | Add `size_system` to the order. |
+| `size_system_implicit` | Warning. Your account routes to a single facility and the facility default was used. Becomes an error in 2.6. | Add `size_system` to the order. |
 
-The systems are not interchangeable. A JP `XL` is 15 cm narrower than a US `XL`. Always confirm which system your garments are measured in before placing an order.
+For the full resolution order, and for what to do with saved order templates, see [Sizing and fit](/guides/sizing) and [Migrating saved templates](/guides/sizing#migrating-saved-templates).
 
-## If you receive a 400
-
-`400 size_system_ambiguous` means your account can route to more than one facility and no `size_system` was present on the order or line. Add `size_system` to the request.
-
-Single-facility accounts that omit `size_system` receive a `size_system_implicit` warning in the response rather than a 400. This becomes a 400 in 2.6 — add `size_system` before then.
-
-## Next steps
-
-- [Sizing and fit](/guides/sizing) — full size ladder reference and migration guide.
-- [Bulk orders and templates](/guides/bulk-orders) — how to update saved templates before 2.6.
-- [Webhooks](/guides/webhooks) — `resolved_size` now appears in `order.created` and `order.updated` payloads.
